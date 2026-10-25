@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151612">
+  <title>Our Next Movie</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Our Next Movie home"><span class="brand-mark">ONM</span><span>OUR NEXT<br>MOVIE</span></a>
+      <div class="sidebar-label">MOVIE NIGHT</div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="discover"><span>✦</span> Discover</button>
+        <button class="nav-item" data-view="watchlist"><span>▤</span> Top picks</button>
+        <button class="nav-item" data-view="history"><span>◷</span> Rating history</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span> Settings</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sync-dot"></div>
+        <div><strong>Local prototype</strong><small>Data saved in this browser</small></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">ONM</span> OUR NEXT MOVIE</div>
+        <div class="topbar-copy"><h1 id="page-title">Discover</h1></div>
+        <div class="user-switcher">
+          <label for="active-user">Voting as</label>
+          <select id="active-user" aria-label="Choose user">
+            <option value="a">Colin</option><option value="b">Erica</option>
+          </select>
+        </div>
+      </header>
+
+      <section id="view-discover" class="view active">
+        <div class="hero-stats compact-stats">
+          <div><strong id="rated-count">0</strong><span>Titles rated</span></div>
+          <div><strong id="mutual-count">0</strong><span>Both rated</span></div>
+          <div><strong id="best-score">—</strong><span>Top score</span></div>
+        </div>
+
+        <div class="section-heading"><div><h2>Discover</h2></div><div class="small-actions"><button id="refresh-recs" class="button button-quiet">↻ Find another</button><button id="manual-add" class="button button-outline">＋ Add a title</button></div></div>
+        <div id="recommendation-card" class="recommendation-card">
+          <div class="poster-wrap"><div class="poster-placeholder">ONM<span>POSTER</span></div></div>
+          <div class="recommendation-info"><span class="pill">START HERE</span><h3>Set up your first recommendation</h3><p>Add a TMDB API key in Settings, or add a title manually to start rating.</p></div>
+        </div>
+      </section>
+
+      <section id="view-watchlist" class="view">
+        <div class="section-heading page-section-heading"><div><h2>Top picks</h2></div></div>
+        <div id="watchlist-list" class="title-grid"></div>
+      </section>
+
+      <section id="view-history" class="view">
+        <div class="section-heading page-section-heading"><div><h2>Rating history</h2></div></div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="section-heading page-section-heading"><div><h2>Settings</h2></div></div>
+        <div class="settings-grid">
+          <article class="settings-card"><h3>TMDB connection</h3><label for="tmdb-key">TMDB API Read Access Token</label><input id="tmdb-key" type="password" autocomplete="off" placeholder="Paste your token"><div class="form-actions"><button id="save-key" class="button button-primary">Save token</button><a href="https://developer.themoviedb.org/docs/getting-started" target="_blank" rel="noreferrer">Get an API key ↗</a></div><p class="notice">Local prototype only: browser-side API credentials can be inspected by anyone with access to the browser. Do not deploy this token publicly. Production setup should use a server-side proxy.</p></article>
+          <article class="settings-card"><h3>People &amp; preferences</h3><label for="name-a">Person A</label><input id="name-a" maxlength="32" value="Alex"><label for="name-b">Person B</label><input id="name-b" maxlength="32" value="Jamie"><label for="accent">Accent colour</label><div class="accent-row"><button class="swatch selected" data-color="#e7a65b" style="--swatch:#e7a65b" aria-label="Amber"></button><button class="swatch" data-color="#a4b88a" style="--swatch:#a4b88a" aria-label="Sage"></button><button class="swatch" data-color="#d58a94" style="--swatch:#d58a94" aria-label="Rose"></button><button class="swatch" data-color="#8faedb" style="--swatch:#8faedb" aria-label="Blue"></button></div><button id="save-names" class="button button-primary">Save preferences</button></article>
+          <article class="settings-card"><h3>Back up your data</h3><div class="form-actions"><button id="export-data" class="button button-outline">Export backup</button><label class="button button-outline file-button">Import backup<input id="import-data" type="file" accept="application/json"></label></div><button id="reset-data" class="text-danger">Reset all local data</button></article>
+          <article class="settings-card"><h3>Custom artwork</h3></article>
+        </div>
+      </section>
+
+      
+    </main>
+  </div>
+
+  <dialog id="rating-dialog" class="modal">
+    <form method="dialog" class="modal-close-row"><button class="icon-button" aria-label="Close">×</button></form>
+    <div id="rating-content"></div>
+  </dialog>
+  <dialog id="add-dialog" class="modal compact-modal">
+    <form method="dialog" class="modal-close-row"><button class="icon-button" aria-label="Close">×</button></form>
+    <h2>Add a title</h2>
+    <label for="title-search">Search movies and TV</label><div class="search-row"><input id="title-search" placeholder="Try “Knives Out”"><button id="search-tmdb" class="button button-primary">Search</button></div>
+    <div id="search-results" class="search-results"></div>
+    <div class="manual-divider"><span>OR ADD MANUALLY</span></div>
+    <label for="manual-title">Title</label><input id="manual-title" placeholder="Title name">
+    <label for="manual-overview">Short blurb</label><textarea id="manual-overview" rows="3" placeholder="What is it about?"></textarea>
+    <label for="manual-type">Type</label><select id="manual-type"><option value="movie">Movie</option><option value="tv">TV show</option></select>
+    <label for="manual-image">Custom poster image (optional)</label><input id="manual-image" type="file" accept="image/*">
+    <button id="create-manual" class="button button-primary full-button">Add to recommendations</button>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
