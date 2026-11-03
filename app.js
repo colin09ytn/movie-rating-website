@@ -24,7 +24,9 @@ function freshData(){return {users:{a:{name:"Colin"},b:{name:"Erica"}},titles:[]
 function loadData(){return freshData()}
 function persist(){renderAll(); queueRemoteSave().catch(e=>{console.error(e);showToast("Couldn't sync changes: "+(e.message||"check your connection"))})}
 let saveQueue = Promise.resolve();
-function queueRemoteSave(){ saveQueue = saveQueue.then(saveCurrentData); return saveQueue; }
+const pendingRatingKeys = new Set();
+function ratingKey(titleId, userId){return `${titleId}:${userId}`;}
+function queueRemoteSave(){ saveQueue = saveQueue.catch(()=>{}).then(saveCurrentData); return saveQueue; }
 function currentUserId(){return state.session?.user?.id || null}
 function roleForUser(id){return id===PERSON_IDS.a?"a":id===PERSON_IDS.b?"b":null}
 function dbError(error){if(error)throw error}
@@ -35,7 +37,7 @@ async function saveCurrentData(){
     const row={id:t.id,group_id:state.groupId,tmdb_id:t.tmdbId?Number(t.tmdbId):null,title:t.title,overview:t.overview||"",poster_path:t.posterPath||"",custom_poster_url:t.customPoster||null,release_date:t.year?(t.year+"-01-01"):null,added_by:uid,year:t.year||"",genres:t.genres||[],source:t.source||"manual"};
     const {error}=await supabaseClient.from("titles").upsert(row,{onConflict:"id"}); dbError(error);
   }
-  const role=state.activeUser;
+  const role=roleForUser(uid);
   for(const [titleId,byUser] of Object.entries(state.data.ratings)){
     const r=byUser?.[role]; if(!r)continue;
     const {error}=await supabaseClient.from("ratings").upsert({group_id:state.groupId,title_id:titleId,user_id:uid,own_rating:r.own,partner_rating:r.partner,updated_at:r.updatedAt||new Date().toISOString()},{onConflict:"title_id,user_id"}); dbError(error);
@@ -57,17 +59,64 @@ async function loadSharedData(){
     supabaseClient.from("ratings").select("*").eq("group_id",state.groupId)
   ]);
   dbError(titlesError); dbError(ratingsError);
-  const mappedTitles=(titles||[]).map(t=>({id:t.id,title:t.title,type:t.source==="tmdb-tv"?"tv":(t.release_date&&t.source==="tv"?"tv":"movie"),tmdbId:t.tmdb_id,overview:t.overview||"",posterPath:t.poster_path||"",customPoster:t.custom_poster_url||"",year:t.year||(t.release_date||"").slice(0,4),genres:Array.isArray(t.genres)?t.genres:[],addedAt:t.created_at,source:t.source||"manual"}));
-  const ratingMap={}; (ratings||[]).forEach(r=>{const role=roleForUser(r.user_id);if(!role)return;ratingMap[r.title_id]=ratingMap[r.title_id]||{};ratingMap[r.title_id][role]={own:Number(r.own_rating),partner:Number(r.partner_rating),updatedAt:r.updated_at}});
-  state.data={users:{a:{name:names.a},b:{name:names.b}},titles:mappedTitles,ratings:ratingMap,settings:{}};
+  mergeRemoteRows(titles||[],ratings||[],names);
   state.ready=true; document.getElementById("auth-screen").hidden=true;document.getElementById("app-shell").hidden=false;
-  if(state.liveChannel){supabaseClient.removeChannel(state.liveChannel);state.liveChannel=null;}
-  state.liveChannel=supabaseClient.channel("onm-group-"+state.groupId).on("postgres_changes",{event:"*",schema:"public",table:"titles",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).on("postgres_changes",{event:"*",schema:"public",table:"ratings",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).subscribe();
+  if(!state.liveChannel){
+    state.liveChannel=supabaseClient.channel("onm-group-"+state.groupId)
+      .on("postgres_changes",{event:"*",schema:"public",table:"titles",filter:"group_id=eq."+state.groupId},()=>refreshSharedData())
+      .on("postgres_changes",{event:"*",schema:"public",table:"ratings",filter:"group_id=eq."+state.groupId},()=>refreshSharedData())
+      .subscribe();
+  }
   const who=document.getElementById("account-label");if(who)who.textContent=names[role]+" · Signed in";
   renderAll();
 }
+function mergeRemoteRows(titles,ratings,names={a:"Colin",b:"Erica"}){
+  const remoteTitles=(titles||[]).map(t=>({id:t.id,title:t.title,type:t.source==="tmdb-tv"?"tv":(t.release_date&&t.source==="tv"?"tv":"movie"),tmdbId:t.tmdb_id,overview:t.overview||"",posterPath:t.poster_path||"",customPoster:t.custom_poster_url||"",year:t.year||(t.release_date||"").slice(0,4),genres:Array.isArray(t.genres)?t.genres:[],addedAt:t.created_at,source:t.source||"manual"}));
+  const titleMap=new Map(state.data.titles.map(t=>[t.id,t]));
+  remoteTitles.forEach(t=>titleMap.set(t.id,{...titleMap.get(t.id),...t}));
+  state.data.titles=[...titleMap.values()].sort((a,b)=>String(b.addedAt||"").localeCompare(String(a.addedAt||"")));
+  state.data.users={a:{name:names.a||state.data.users.a.name},b:{name:names.b||state.data.users.b.name}};
+  (ratings||[]).forEach(row=>{
+    const role=roleForUser(row.user_id); if(!role)return;
+    const key=ratingKey(row.title_id,row.user_id);
+    if(pendingRatingKeys.has(key))return;
+    state.data.ratings[row.title_id]=state.data.ratings[row.title_id]||{};
+    state.data.ratings[row.title_id][role]={own:Number(row.own_rating),partner:Number(row.partner_rating),updatedAt:row.updated_at};
+  });
+}
+async function saveRatingToSupabase(titleId,role,rating){
+  if(!state.session||!state.groupId)throw new Error("You are not signed in to the shared movie group.");
+  const uid=currentUserId();
+  const t=state.data.titles.find(x=>x.id===titleId);
+  if(!t)throw new Error("This title is no longer in the shared list. Refresh and try again.");
+  // Ensure the title row exists before writing a rating that references it.
+  const titleRow={id:t.id,group_id:state.groupId,tmdb_id:t.tmdbId?Number(t.tmdbId):null,title:t.title,overview:t.overview||"",poster_path:t.posterPath||"",custom_poster_url:t.customPoster||null,release_date:t.year?(t.year+"-01-01"):null,added_by:uid,year:t.year||"",genres:t.genres||[],source:t.source||"manual"};
+  const {error:titleError}=await supabaseClient.from("titles").upsert(titleRow,{onConflict:"id"}); dbError(titleError);
+  const {error}=await supabaseClient.from("ratings").upsert({group_id:state.groupId,title_id:titleId,user_id:uid,own_rating:rating.own,partner_rating:rating.partner,updated_at:rating.updatedAt},{onConflict:"title_id,user_id"});
+  dbError(error);
+}
 let refreshTimer=null;
-function refreshSharedData(){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(async()=>{if(!state.session||!state.groupId)return;try{await loadSharedData()}catch(e){console.warn("Realtime refresh failed",e)}},450)}
+let refreshInFlight=false;
+let refreshAgain=false;
+function refreshSharedData(){
+  if(refreshTimer)clearTimeout(refreshTimer);
+  refreshTimer=setTimeout(async()=>{
+    if(!state.session||!state.groupId)return;
+    if(refreshInFlight){refreshAgain=true;return;}
+    refreshInFlight=true;
+    try{
+      const [{data:titles,error:titlesError},{data:ratings,error:ratingsError}]=await Promise.all([
+        supabaseClient.from("titles").select("*").eq("group_id",state.groupId).order("created_at",{ascending:false}),
+        supabaseClient.from("ratings").select("*").eq("group_id",state.groupId)
+      ]);
+      dbError(titlesError); dbError(ratingsError);
+      const names={a:state.data.users.a.name,b:state.data.users.b.name};
+      mergeRemoteRows(titles||[],ratings||[],names);
+      renderAll();
+    }catch(e){console.warn("Realtime refresh failed",e)}
+    finally{refreshInFlight=false;if(refreshAgain){refreshAgain=false;refreshSharedData();}}
+  },350);
+}
 async function startApp(){
   const {data:{session},error}=await supabaseClient.auth.getSession();if(error)console.error(error);
   state.session=session;
@@ -96,7 +145,28 @@ function renderWatchlist(){const el=document.getElementById("watchlist-list");co
 function renderHistory(){const el=document.getElementById("history-list");const items=[...state.data.titles].filter(hasRated).sort((a,b)=>Number(bothRated(a))-Number(bothRated(b)));if(!items.length){el.innerHTML='<div class="empty-state"><strong>Your rating history is empty</strong>Rate a title and it will be recorded here.</div>';return}el.innerHTML=items.map(t=>`<article class="history-row">${imgHtml(t)}<div class="history-info"><h3>${esc(t.title)}</h3><p>${state.data.ratings[t.id]?.a?`${esc(state.data.users.a.name)} rated ${state.data.ratings[t.id].a.own}/10`:"Waiting for "+esc(state.data.users.a.name)} · ${state.data.ratings[t.id]?.b?`${esc(state.data.users.b.name)} rated ${state.data.ratings[t.id].b.own}/10`:"Waiting for "+esc(state.data.users.b.name)}</p></div><span class="status ${bothRated(t)?"complete":""}">${bothRated(t)?`Score ${combinedScore(t)}/200`:"Needs second vote"}</span><button class="button button-quiet" onclick="openDetails('${t.id}')">Details</button></article>`).join("")}
 function renderSettings(){document.getElementById("tmdb-key").value=state.tmdbToken;document.getElementById("name-a").value=state.data.users.a.name;document.getElementById("name-b").value=state.data.users.b.name;document.querySelectorAll(".swatch").forEach(b=>b.classList.toggle("selected",b.dataset.color===state.accent));document.documentElement.style.setProperty("--accent",state.accent);}
 function openRating(id){const t=state.data.titles.find(x=>x.id===id);if(!t)return;state.currentId=id;const r=ratingFor(id)||{own:5,partner:5};const existing=!!ratingFor(id);document.getElementById("rating-content").innerHTML=`<div class="rating-layout">${imgHtml(t,"rating-poster")}<div class="rating-details"><span class="eyebrow">YOUR TAKE</span><h2>${esc(t.title)}</h2><div class="meta-row">${esc(t.year||"")} · ${t.type==="tv"?"TV show":"Movie"}</div><p>${esc(t.overview||"No synopsis available.")}</p><div class="rating-field"><div class="rating-field-head"><span>How much do you want to watch it?</span><span class="rating-value" id="own-value">${r.own}/10</span></div><input id="own-rating" type="range" min="0" max="10" step="1" value="${r.own}"><div class="range-ends"><span>Not interested</span><span>Very interested</span></div></div><div class="rating-field"><div class="rating-field-head"><span>How much do you think ${esc(state.data.users[state.activeUser==="a"?"b":"a"].name)} wants to watch it?</span><span class="rating-value" id="partner-value">${r.partner}/10</span></div><input id="partner-rating" type="range" min="0" max="10" step="1" value="${r.partner}"><div class="range-ends"><span>Not interested</span><span>Very interested</span></div></div><div class="rating-footer"><button class="button button-outline" onclick="document.getElementById('rating-dialog').close()">Cancel</button><button class="button button-primary" id="save-rating">${existing?"Update my rating":"Save my rating"}</button></div></div></div>`;
-document.getElementById("own-rating").addEventListener("input",e=>document.getElementById("own-value").textContent=e.target.value+"/10");document.getElementById("partner-rating").addEventListener("input",e=>document.getElementById("partner-value").textContent=e.target.value+"/10");document.getElementById("save-rating").addEventListener("click",()=>{state.data.ratings[id]=state.data.ratings[id]||{};state.data.ratings[id][state.activeUser]={own:Number(document.getElementById("own-rating").value),partner:Number(document.getElementById("partner-rating").value),updatedAt:new Date().toISOString()};document.getElementById("rating-dialog").close();persist();showToast(bothRated(t)?"Both votes are in — shared score updated.":"Rating saved and syncing.");});document.getElementById("rating-dialog").showModal()}
+document.getElementById("own-rating").addEventListener("input",e=>document.getElementById("own-value").textContent=e.target.value+"/10");document.getElementById("partner-rating").addEventListener("input",e=>document.getElementById("partner-value").textContent=e.target.value+"/10");document.getElementById("save-rating").addEventListener("click",async()=>{
+  const role=state.activeUser, uid=currentUserId(), key=ratingKey(id,uid);
+  const previous=state.data.ratings[id]?.[role]||null;
+  const rating={own:Number(document.getElementById("own-rating").value),partner:Number(document.getElementById("partner-rating").value),updatedAt:new Date().toISOString()};
+  state.data.ratings[id]=state.data.ratings[id]||{};state.data.ratings[id][role]=rating;
+  const button=document.getElementById("save-rating");button.disabled=true;button.textContent="Saving…";
+  pendingRatingKeys.add(key);renderAll();
+  try{
+    await saveRatingToSupabase(id,role,rating);
+    pendingRatingKeys.delete(key);
+    document.getElementById("rating-dialog").close();
+    renderAll();
+    showToast(bothRated(t)?"Both votes are in — shared score updated.":"Rating saved successfully.");
+    refreshSharedData();
+  }catch(error){
+    pendingRatingKeys.delete(key);
+    if(previous)state.data.ratings[id][role]=previous;else{delete state.data.ratings[id][role];if(!Object.keys(state.data.ratings[id]).length)delete state.data.ratings[id];}
+    button.disabled=false;button.textContent=existing?"Update my rating":"Save my rating";
+    renderAll();
+    showToast("Rating could not be saved: "+(error.message||"Please try again."));
+  }
+});document.getElementById("rating-dialog").showModal()}
 function openDetails(id){const t=state.data.titles.find(x=>x.id===id);if(!t)return;state.currentId=id;document.getElementById("rating-content").innerHTML=`<div class="rating-layout">${imgHtml(t,"rating-poster")}<div class="rating-details"><span class="eyebrow">TITLE DETAILS</span><h2>${esc(t.title)}</h2><div class="meta-row">${esc(t.year||"")} · ${t.type==="tv"?"TV show":"Movie"} ${bothRated(t)?`· Shared score ${combinedScore(t)}/200`:""}</div><p>${esc(t.overview||"No synopsis available.")}</p><div class="rating-field"><strong style="font-size:12px">Ratings so far</strong><p>${["a","b"].map(u=>state.data.ratings[id]?.[u]?`${esc(state.data.users[u].name)}: own ${state.data.ratings[id][u].own}/10, partner estimate ${state.data.ratings[id][u].partner}/10`:`${esc(state.data.users[u].name)} has not rated yet`).join("<br>")}</p></div><label for="custom-poster-file">Upload custom poster</label><input id="custom-poster-file" type="file" accept="image/*"><div class="rating-footer"><button class="button button-outline" onclick="removeTitle('${id}')">Remove title</button><button class="button button-primary" onclick="document.getElementById('rating-dialog').close();openRating('${id}')">Rate this title</button></div></div></div>`;
 document.getElementById("custom-poster-file").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;if(f.size>2*1024*1024){showToast("Please use an image under 2 MB.");return}const data=await fileToDataURL(f);t.customPoster=data;persist();openDetails(id);showToast("Custom poster updated.");});document.getElementById("rating-dialog").showModal()}
 function removeTitle(id){if(!confirm("Remove this title and its ratings from this browser?"))return;state.data.titles=state.data.titles.filter(t=>t.id!==id);delete state.data.ratings[id];document.getElementById("rating-dialog").close();persist();showToast("Title removed.")}
