@@ -1,7 +1,7 @@
 /* Our Next Movie — Supabase-backed shared app. */
 const SUPABASE_URL = "https://rekfxjwaxvriymeljysj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_EzL9fK_qAvH-a6LfarHlYQ_ftnHPf3p";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 const PERSON_IDS = { a: "fbc4738f-b27c-49d2-8f58-6256899a898b", b: "40eb4c54-d663-451b-b35c-e4df91023ca8" };
 const STORE_KEY = "our-next-movie-ui-v1";
 const TMDB_IMAGE = "https://image.tmdb.org/t/p/w500";
@@ -33,43 +33,43 @@ async function saveCurrentData(){
   const uid=currentUserId();
   for(const t of state.data.titles){
     const row={id:t.id,group_id:state.groupId,tmdb_id:t.tmdbId?Number(t.tmdbId):null,title:t.title,overview:t.overview||"",poster_path:t.posterPath||"",custom_poster_url:t.customPoster||null,release_date:t.year?(t.year+"-01-01"):null,added_by:uid,year:t.year||"",genres:t.genres||[],source:t.source||"manual"};
-    const {error}=await supabase.from("titles").upsert(row,{onConflict:"id"}); dbError(error);
+    const {error}=await supabaseClient.from("titles").upsert(row,{onConflict:"id"}); dbError(error);
   }
   const role=state.activeUser;
   for(const [titleId,byUser] of Object.entries(state.data.ratings)){
     const r=byUser?.[role]; if(!r)continue;
-    const {error}=await supabase.from("ratings").upsert({group_id:state.groupId,title_id:titleId,user_id:uid,own_rating:r.own,partner_rating:r.partner,updated_at:r.updatedAt||new Date().toISOString()},{onConflict:"title_id,user_id"}); dbError(error);
+    const {error}=await supabaseClient.from("ratings").upsert({group_id:state.groupId,title_id:titleId,user_id:uid,own_rating:r.own,partner_rating:r.partner,updated_at:r.updatedAt||new Date().toISOString()},{onConflict:"title_id,user_id"}); dbError(error);
   }
 }
 async function loadSharedData(){
   const uid=currentUserId();
-  const {data:members,error:memberError}=await supabase.from("group_members").select("group_id,user_id,display_name").eq("user_id",uid);
+  const {data:members,error:memberError}=await supabaseClient.from("group_members").select("group_id,user_id,display_name").eq("user_id",uid);
   dbError(memberError);
   if(!members?.length)throw new Error("This account is not assigned to the shared movie group. Check group_members in Supabase.");
   state.groupId=members[0].group_id;
-  const {data:allMembers,error:allMemberError}=await supabase.from("group_members").select("group_id,user_id,display_name").eq("group_id",state.groupId);
+  const {data:allMembers,error:allMemberError}=await supabaseClient.from("group_members").select("group_id,user_id,display_name").eq("group_id",state.groupId);
   dbError(allMemberError); state.members=allMembers||[];
   const role=roleForUser(uid); if(!role)throw new Error("This login isn't one of the two configured movie-night accounts."); state.activeUser=role;
   const names={a:"Colin",b:"Erica"};
   state.members.forEach(m=>{const r=roleForUser(m.user_id);if(r)names[r]=m.display_name||names[r]});
   const [{data:titles,error:titlesError},{data:ratings,error:ratingsError}] = await Promise.all([
-    supabase.from("titles").select("*").eq("group_id",state.groupId).order("created_at",{ascending:false}),
-    supabase.from("ratings").select("*").eq("group_id",state.groupId)
+    supabaseClient.from("titles").select("*").eq("group_id",state.groupId).order("created_at",{ascending:false}),
+    supabaseClient.from("ratings").select("*").eq("group_id",state.groupId)
   ]);
   dbError(titlesError); dbError(ratingsError);
   const mappedTitles=(titles||[]).map(t=>({id:t.id,title:t.title,type:t.source==="tmdb-tv"?"tv":(t.release_date&&t.source==="tv"?"tv":"movie"),tmdbId:t.tmdb_id,overview:t.overview||"",posterPath:t.poster_path||"",customPoster:t.custom_poster_url||"",year:t.year||(t.release_date||"").slice(0,4),genres:Array.isArray(t.genres)?t.genres:[],addedAt:t.created_at,source:t.source||"manual"}));
   const ratingMap={}; (ratings||[]).forEach(r=>{const role=roleForUser(r.user_id);if(!role)return;ratingMap[r.title_id]=ratingMap[r.title_id]||{};ratingMap[r.title_id][role]={own:Number(r.own_rating),partner:Number(r.partner_rating),updatedAt:r.updated_at}});
   state.data={users:{a:{name:names.a},b:{name:names.b}},titles:mappedTitles,ratings:ratingMap,settings:{}};
   state.ready=true; document.getElementById("auth-screen").hidden=true;document.getElementById("app-shell").hidden=false;
-  if(state.liveChannel){supabase.removeChannel(state.liveChannel);state.liveChannel=null;}
-  state.liveChannel=supabase.channel("onm-group-"+state.groupId).on("postgres_changes",{event:"*",schema:"public",table:"titles",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).on("postgres_changes",{event:"*",schema:"public",table:"ratings",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).subscribe();
+  if(state.liveChannel){supabaseClient.removeChannel(state.liveChannel);state.liveChannel=null;}
+  state.liveChannel=supabaseClient.channel("onm-group-"+state.groupId).on("postgres_changes",{event:"*",schema:"public",table:"titles",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).on("postgres_changes",{event:"*",schema:"public",table:"ratings",filter:"group_id=eq."+state.groupId},()=>refreshSharedData()).subscribe();
   const who=document.getElementById("account-label");if(who)who.textContent=names[role]+" · Signed in";
   renderAll();
 }
 let refreshTimer=null;
 function refreshSharedData(){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(async()=>{if(!state.session||!state.groupId)return;try{await loadSharedData()}catch(e){console.warn("Realtime refresh failed",e)}},450)}
 async function startApp(){
-  const {data:{session},error}=await supabase.auth.getSession();if(error)console.error(error);
+  const {data:{session},error}=await supabaseClient.auth.getSession();if(error)console.error(error);
   state.session=session;
   if(!session){document.getElementById("auth-screen").hidden=false;document.getElementById("app-shell").hidden=true;return}
   try{await loadSharedData()}catch(e){document.getElementById("auth-error").textContent=e.message;document.getElementById("auth-screen").hidden=false;document.getElementById("app-shell").hidden=true;}
@@ -182,12 +182,12 @@ document.getElementById("save-names").addEventListener("click",()=>showToast("Ac
 document.querySelectorAll(".swatch").forEach(b=>b.addEventListener("click",()=>{state.accent=b.dataset.color;localStorage.setItem("df_accent",state.accent);renderSettings()}));
 document.getElementById("export-data").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(state.data,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="our-next-movie-backup.json";a.click();URL.revokeObjectURL(a.href)});
 document.getElementById("import-data").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{const d=JSON.parse(await f.text());if(!d.users||!Array.isArray(d.titles)||!d.ratings)throw new Error("This doesn't look like a Double Feature backup.");state.data=d;persist();showToast("Backup imported.");}catch(err){showToast(err.message||"Could not import backup.")}e.target.value=""});
-document.getElementById("reset-data").addEventListener("click",async()=>{if(!confirm("Delete every movie and rating from the shared group for both people? This cannot be undone. Continue?"))return;try{const {error}=await supabase.from("titles").delete().eq("group_id",state.groupId);dbError(error);state.data=freshData();state.currentId=null;renderAll();showToast("Shared movie list cleared.")}catch(e){showToast("Reset failed: "+e.message)}});
+document.getElementById("reset-data").addEventListener("click",async()=>{if(!confirm("Delete every movie and rating from the shared group for both people? This cannot be undone. Continue?"))return;try{const {error}=await supabaseClient.from("titles").delete().eq("group_id",state.groupId);dbError(error);state.data=freshData();state.currentId=null;renderAll();showToast("Shared movie list cleared.")}catch(e){showToast("Reset failed: "+e.message)}});
 window.openAddDialog=openAddDialog;window.openRating=openRating;window.openDetails=openDetails;window.removeTitle=removeTitle;window.setView=setView;window.nextCandidate=nextCandidate;
 renderAll();
 
 // Auth controls and persistent-session bootstrap.
-document.getElementById("login-form").addEventListener("submit",async e=>{e.preventDefault();const email=document.getElementById("login-email").value.trim();const password=document.getElementById("login-password").value;const button=document.getElementById("login-submit");button.disabled=true;document.getElementById("auth-error").textContent="Signing in…";try{const {data,error}=await supabase.auth.signInWithPassword({email,password});dbError(error);state.session=data.session;document.getElementById("auth-error").textContent="";await loadSharedData()}catch(err){document.getElementById("auth-error").textContent=err.message||"Unable to sign in."}finally{button.disabled=false}});
-document.getElementById("logout-button").addEventListener("click",async()=>{const {error}=await supabase.auth.signOut();if(error){showToast(error.message);return}state.session=null;state.groupId=null;state.ready=false;state.data=freshData();document.getElementById("app-shell").hidden=true;document.getElementById("auth-screen").hidden=false;document.getElementById("login-password").value="";document.getElementById("auth-error").textContent="Signed out."});
-supabase.auth.onAuthStateChange((_event,session)=>{state.session=session;if(!session){document.getElementById("auth-screen").hidden=false;document.getElementById("app-shell").hidden=true}});
+document.getElementById("login-form").addEventListener("submit",async e=>{e.preventDefault();const email=document.getElementById("login-email").value.trim();const password=document.getElementById("login-password").value;const button=document.getElementById("login-submit");button.disabled=true;document.getElementById("auth-error").textContent="Signing in…";try{const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});dbError(error);state.session=data.session;document.getElementById("auth-error").textContent="";await loadSharedData()}catch(err){document.getElementById("auth-error").textContent=err.message||"Unable to sign in."}finally{button.disabled=false}});
+document.getElementById("logout-button").addEventListener("click",async()=>{const {error}=await supabaseClient.auth.signOut();if(error){showToast(error.message);return}state.session=null;state.groupId=null;state.ready=false;state.data=freshData();document.getElementById("app-shell").hidden=true;document.getElementById("auth-screen").hidden=false;document.getElementById("login-password").value="";document.getElementById("auth-error").textContent="Signed out."});
+supabaseClient.auth.onAuthStateChange((_event,session)=>{state.session=session;if(!session){document.getElementById("auth-screen").hidden=false;document.getElementById("app-shell").hidden=true}});
 startApp();
