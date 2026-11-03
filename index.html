@@ -6,9 +6,25 @@
   <meta name="theme-color" content="#151612">
   <title>Our Next Movie</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="auth.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <div class="app-shell">
+  <section id="auth-screen" class="auth-screen" hidden>
+    <form id="login-form" class="auth-card">
+      <div class="brand-mark auth-mark">ONM</div>
+      <p class="auth-eyebrow">OUR NEXT MOVIE</p>
+      <h1>Movie night, together.</h1>
+      <p class="auth-copy">Sign in to see your shared movie list and ratings.</p>
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username" required placeholder="you@example.com">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required placeholder="Your password">
+      <button id="login-submit" class="button button-primary full-button" type="submit">Sign in</button>
+      <p id="auth-error" class="auth-error" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+  <div class="app-shell" id="app-shell" hidden>
     <aside class="sidebar">
       <a class="brand" href="#" aria-label="Our Next Movie home"><span class="brand-mark">ONM</span><span>OUR NEXT<br>MOVIE</span></a>
       <div class="sidebar-label">MOVIE NIGHT</div>
@@ -18,10 +34,7 @@
         <button class="nav-item" data-view="history"><span>◷</span> Rating history</button>
         <button class="nav-item" data-view="settings"><span>⚙</span> Settings</button>
       </nav>
-      <div class="sidebar-bottom">
-        <div class="sync-dot"></div>
-        <div><strong>Local prototype</strong><small>Data saved in this browser</small></div>
-      </div>
+      <div class="sidebar-bottom"><div class="sync-dot"></div><div><strong>Shared movie night</strong><small>Synced with Supabase</small></div></div>
     </aside>
 
     <main class="main">
@@ -29,7 +42,7 @@
         <div class="mobile-brand"><span class="brand-mark">ONM</span> OUR NEXT MOVIE</div>
         <div class="topbar-copy"><h1 id="page-title">Discover</h1></div>
         <div class="user-switcher">
-          <label for="active-user">Voting as</label>
+          <span id="account-label">Signed in</span><button id="logout-button" class="button button-outline" type="button">Sign out</button><label for="active-user" hidden>Voting as</label>
           <select id="active-user" aria-label="Choose user">
             <option value="a">Colin</option><option value="b">Erica</option>
           </select>
@@ -63,9 +76,9 @@
       <section id="view-settings" class="view">
         <div class="section-heading page-section-heading"><div><h2>Settings</h2></div></div>
         <div class="settings-grid">
-          <article class="settings-card"><h3>TMDB connection</h3><label for="tmdb-key">TMDB API Read Access Token</label><input id="tmdb-key" type="password" autocomplete="off" placeholder="Paste your token"><div class="form-actions"><button id="save-key" class="button button-primary">Save token</button><a href="https://developer.themoviedb.org/docs/getting-started" target="_blank" rel="noreferrer">Get an API key ↗</a></div><p class="notice">Local prototype only: browser-side API credentials can be inspected by anyone with access to the browser. Do not deploy this token publicly. Production setup should use a server-side proxy.</p></article>
-          <article class="settings-card"><h3>People &amp; preferences</h3><label for="name-a">Person A</label><input id="name-a" maxlength="32" value="Alex"><label for="name-b">Person B</label><input id="name-b" maxlength="32" value="Jamie"><label for="accent">Accent colour</label><div class="accent-row"><button class="swatch selected" data-color="#e7a65b" style="--swatch:#e7a65b" aria-label="Amber"></button><button class="swatch" data-color="#a4b88a" style="--swatch:#a4b88a" aria-label="Sage"></button><button class="swatch" data-color="#d58a94" style="--swatch:#d58a94" aria-label="Rose"></button><button class="swatch" data-color="#8faedb" style="--swatch:#8faedb" aria-label="Blue"></button></div><button id="save-names" class="button button-primary">Save preferences</button></article>
-          <article class="settings-card"><h3>Back up your data</h3><div class="form-actions"><button id="export-data" class="button button-outline">Export backup</button><label class="button button-outline file-button">Import backup<input id="import-data" type="file" accept="application/json"></label></div><button id="reset-data" class="text-danger">Reset all local data</button></article>
+          <article class="settings-card"><h3>TMDB connection</h3><label for="tmdb-key">TMDB API Read Access Token</label><input id="tmdb-key" type="password" autocomplete="off" placeholder="Paste your token"><div class="form-actions"><button id="save-key" class="button button-primary">Save token</button><a href="https://developer.themoviedb.org/docs/getting-started" target="_blank" rel="noreferrer">Get an API key ↗</a></div><p class="notice">TMDB requests run in your browser. Keep this token private and use a restricted token if possible.</p></article>
+          <article class="settings-card"><h3>People &amp; preferences</h3><p>Accounts are managed securely through Supabase. Each person can only edit their own ratings.</p><label for="name-a">Colin</label><input id="name-a" maxlength="32" value="Colin" disabled><label for="name-b">Erica</label><input id="name-b" maxlength="32" value="Erica" disabled><label for="accent">Accent colour</label><div class="accent-row"><button class="swatch selected" data-color="#e7a65b" style="--swatch:#e7a65b" aria-label="Amber"></button><button class="swatch" data-color="#a4b88a" style="--swatch:#a4b88a" aria-label="Sage"></button><button class="swatch" data-color="#d58a94" style="--swatch:#d58a94" aria-label="Rose"></button><button class="swatch" data-color="#8faedb" style="--swatch:#8faedb" aria-label="Blue"></button></div><button id="save-names" class="button button-primary">Save preferences</button></article>
+          <article class="settings-card"><h3>Back up your data</h3><div class="form-actions"><button id="export-data" class="button button-outline">Export backup</button><label class="button button-outline file-button">Import backup<input id="import-data" type="file" accept="application/json"></label></div><button id="reset-data" class="text-danger">Clear the shared movie list</button></article>
           <article class="settings-card"><h3>Custom artwork</h3></article>
         </div>
       </section>

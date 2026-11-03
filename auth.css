@@ -1,0 +1,16 @@
+/* Authentication screen for the Supabase-backed Our Next Movie app. */
+.auth-screen{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg,#f4f5f9);color:var(--ink,#24253a);font-family:'DM Sans',sans-serif}
+.auth-screen[hidden],#app-shell[hidden]{display:none!important}
+.auth-card{width:min(420px,100%);padding:34px;background:var(--paper,#fff);border:1px solid var(--line,#e2e4ef);border-radius:18px;box-shadow:0 12px 38px #29264b12}
+.auth-mark{margin-bottom:22px;background:#29264b;color:#f4a261;border-color:#f4a261}
+.auth-eyebrow{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.8px;color:var(--muted,#74778c);margin:0 0 8px}
+.auth-card h1{font-size:30px;letter-spacing:-1px;line-height:1.1;margin:0 0 10px}
+.auth-copy{font-size:13px;line-height:1.6;color:var(--muted,#74778c);margin:0 0 22px}
+.auth-card label{display:block;font-size:12px;font-weight:700;margin:14px 0 6px}
+.auth-card input{display:block;width:100%;border:1px solid var(--line,#e2e4ef);background:#fbfbff;border-radius:8px;padding:12px;color:var(--ink,#24253a);outline-color:var(--accent,#f4a261)}
+.auth-card .full-button{margin-top:20px}
+.auth-error{font-size:12px;line-height:1.5;color:#a3473f;min-height:18px;margin:12px 0 0;overflow-wrap:anywhere}
+.user-switcher{gap:10px}
+#account-label{font-size:12px;font-weight:700;color:var(--ink,#24253a)}
+#logout-button{padding:8px 10px}
+@media(max-width:760px){.auth-card{padding:26px 22px}.auth-card h1{font-size:27px}.user-switcher{display:flex!important;align-items:center;flex-wrap:wrap}}
